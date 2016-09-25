@@ -145,27 +145,6 @@ uninstall(){
 	fi
 }
 
-run(){
-	INSTANCE=$(get_display_name $1)
-	`which pm2` start PhantomBot@${INSTANCE}
-}
-
-terminate(){
-	INSTANCE=$(get_display_name $1)
-	`which pm2` stop PhantomBot@${INSTANCE}
-
-}
-
-status(){
-	INSTANCE=$(get_display_name $1)
-	`which pm2` show PhantomBot@${INSTANCE}
-}
-
-reload(){
-	INSTANCE=$(get_display_name $1)
-	`which pm2` restart PhantomBot@${INSTANCE}
-}
-
 get_instance
 
 case $PROC in
@@ -183,22 +162,10 @@ case $PROC in
 	uninstall)
 		uninstall $INSTANCE_GLOBAL
 		;;
-	start)
-		run $INSTANCE_GLOBAL
-		;;
-	stop)
-		terminate $INSTANCE_GLOBAL
-		;;
-	status)
-		status $INSTANCE_GLOBAL
-		;;
-	restart)
-		reload $INSTANCE_GLOBAL
-		;;
 	reload)
 		fix_pm2 $INSTANCE_GLOBAL
 		;;
 	help|*)
-		echo "Usage $0 (install|uninstall|start|stop|status|restart|reload|help)"
+		echo "Usage $0 (install|uninstall|reload|help)"
 		;;
 esac
