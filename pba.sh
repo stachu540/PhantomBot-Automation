@@ -77,7 +77,6 @@ install(){
 	
 	cd ${INSTANCES}/${INSTANCE} && \
 	`which pm2` start java \
-	--pid ${INSTANCES}/${INSTANCE}/PhantomBot.${botname[0],,}.pid \
 	--name "PhantomBot@${INSTANCE}" \
 	--error "${INSTANCES}/${INSTANCE}/stacktrace.txt" \
 	--cron "0 5 * * *" \
@@ -105,17 +104,15 @@ fix_pm2(){
 		echo "Type instance first"
 		exit 1
 	fi
-	botname=$(cat $INSTANCES/$INSTANCE/botlogin.txt | grep '^user=' | cut -d '=' -f2)
+	
 	echo $botname, $INSTANCE
 	`which pm2` describe PhantomBot@${INSTANCE} > /dev/null
 	RUNNING=$?
-	
-	if [ ${RUNNING} == 0]; then
+	if [ ${RUNNING} == 0 ]; then
 		`which pm2` delete PhantomBot@${INSTANCE}
 	fi
 	cd ${INSTANCES}/${INSTANCE} && \
 	`which pm2` start java \
-	--pid ${INSTANCES}/${INSTANCE}/PhantomBot.${botname[0],,}.pid \
 	--name "PhantomBot@${INSTANCE}" \
 	--error "${INSTANCES}/${INSTANCE}/stacktrace.txt" \
 	--cron "0 5 * * *" \
