@@ -1,4 +1,6 @@
-#!/bin/bash 
+#!/bin/bash
+
+source .env 
 
 date=`date +%d-%m-%y`
 
