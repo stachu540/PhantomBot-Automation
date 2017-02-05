@@ -11,23 +11,17 @@ CORE=${PBA_DIR}/.core
 SKEL=${PBA_DIR}/.skel
 TEMP=${PBA_DIR}/.temp
 BACKUP=${PBA_DIR}/backups
+
 GITHUB="https://api.github.com/repos/phantombot/phantombot/releases/latest"
 TWITCH="https://api.twitch.tv/kraken"
+
 JAVA_PACKAGE_NAME="jre-8u121-linux-x64"
 JAVA_DEB_PACKAGE="oracle-java8-jre_8u121_amd64.deb"
 JAVA_DOWNLOAD="http://download.oracle.com/otn-pub/java/jdk/8u121-b13/${JAVA_PACKAGE_NAME}"
 
-if [[ -z ${TWITCH_CID} || ${TWITCH_CID} -eq "" ]]; then
-    echo "Please edit this file before you continue."
-    exit 0
-fi
 
-if [[ ! -e ${CORE}/latest/PhantomBot.jar && ${COMMAND} -eq "init" ]]; then
-  core
-else
   current_version=$(curl ${PB_GITHUB} 2>/dev/null | jq -r '.tag_name' | cut -d 'v' -f2)
   local_version=$(unzip -q -c ${CORE}/latest/PhantomBot.jar 2>/dev/null | grep 'Implementation-Version' | cut -d ':' -f2 | cut -d ' ' -f2)
-fi
 
 PKG_INSTALL() {
   if [ -f /etc/os-release ] ; then
@@ -42,7 +36,7 @@ core() {
   USERGRP=`stat -c "%G" ${PBA_DIR}/phantombot`
 
   if [ ! -d $TEMP ]; then
-    mkdir $TEMP
+  mkdir $TEMP
   fi
 
   if [ ! -d $BACKUP ]; then
@@ -404,6 +398,10 @@ delete() {
   fi
 }
 
+
+if [[ ! -e ${CORE}/latest/PhantomBot.jar && ${COMMAND} -eq "init" ]]; then
+  core
+fi
 
 if [[ ${COMMAND} -ne "install" ]]; then
   if [ -z ${INSTANCE_LIST} ] ; then
