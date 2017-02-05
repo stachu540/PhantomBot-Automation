@@ -15,4 +15,4 @@ Just request new issue if you find some buggy stuff. I'll try fixing this issue 
 
 ## Licence
 
-The script is available under (MIT license)[https://github.com/stachu540/Phantombot-Automation/blob/master/LICENSE].
+The script is available under [MIT license](./LICENSE).
