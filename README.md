@@ -8,7 +8,7 @@ First at all, you need generate a client id from Twitch, cause this stuff gettin
 
 Next step is initializing script to install dependences. Very important thing: You need launch it as Root.
 
-``` bash
+```bash
 sudo sh phantombot.sh init
 ```
 
