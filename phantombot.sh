@@ -1,4 +1,7 @@
 #!/bin/sh
+
+# Editable zone
+
 TWITCH_CID="" # Generate your own client id at: https://www.twitch.tv/kraken/oauth2/clients/new
 
 # Do Not Edit at this line
@@ -6,7 +9,12 @@ PBA_DIR=$(dirname $(realpath ${0}))
 COMMAND=${1}
 ARGUMENT=${2}
 INSTANCES=${PBA_DIR}/instances
-INSTANCE_LIST=(`find ${INSTANCES}/* -maxdepth 0 -type d 2>/dev/null | xargs -n1 basename 2>/dev/null | tr "\n" " "`)
+if INST_LIST=`find ${INSTANCES}/* -maxdepth 0 -type d 2>/dev/null` || [ ! -z ${INST_LIST} ]; then
+  cnt=0
+  for INSTANCED in `${INST_LIST} | xargs -n1 basename 2>/dev/null | tr "\n" " "`; do
+    INSTANCE_LIST[$((cnt++))]=${INSTANCED}
+  done
+fi
 CORE=${PBA_DIR}/.core
 SKEL=${PBA_DIR}/.skel
 TEMP=${PBA_DIR}/.temp
@@ -15,91 +23,156 @@ BACKUP=${PBA_DIR}/backups
 GITHUB="https://api.github.com/repos/phantombot/phantombot/releases/latest"
 TWITCH="https://api.twitch.tv/kraken"
 
+# skip download licence http://stackoverflow.com/questions/10268583/downloading-java-jdk-on-linux-via-wget-is-shown-license-page-instead
 JAVA_PACKAGE_NAME="jre-8u121-linux-x64"
 JAVA_DEB_PACKAGE="oracle-java8-jre_8u121_amd64.deb"
-JAVA_DOWNLOAD="http://download.oracle.com/otn-pub/java/jdk/8u121-b13/${JAVA_PACKAGE_NAME}"
+JAVA_DOWNLOAD="http://download.oracle.com/otn-pub/java/jdk/8u121-b13/e9e7ea248e2c4826b92b3f075a80e441/${JAVA_PACKAGE_NAME}"
 
-
-  current_version=$(curl ${PB_GITHUB} 2>/dev/null | jq -r '.tag_name' | cut -d 'v' -f2)
-  local_version=$(unzip -q -c ${CORE}/latest/PhantomBot.jar 2>/dev/null | grep 'Implementation-Version' | cut -d ':' -f2 | cut -d ' ' -f2)
-
-PKG_INSTALL() {
+PKG() {
   if [ -f /etc/os-release ] ; then
-    yum install -y $@
+    yum -q $@
   elif [ -f /etc/lsb-release ] ; then
-    apt-get install -y $@
+    apt-get -qq $@
   fi
 }
 
-core() {
-  USEROWN=`stat -c "%U" ${PBA_DIR}/phantombot`
-  USERGRP=`stat -c "%G" ${PBA_DIR}/phantombot`
-
-  if [ ! -d $TEMP ]; then
-  mkdir $TEMP
+PKG_UPDATE() {
+  if [ -f /etc/os-release ] ; then
+    PKG -y update
+  elif [ -f /etc/lsb-release ] ; then
+    PKG update
+    PKG -y upgrade
   fi
+}
 
-  if [ ! -d $BACKUP ]; then
-    mkdir $BACKUP
-  fi
-
-  if [ ! -d $INSTANCES ]; then
-    mkdir $INSTANCES
-  fi
-
-  if [ ! -d $CORE ]; then
-    mkdir $CORE
-  fi
-
-  if [ ${UID} -eq 0 ]; then
-    if [ ! -e $(which jq) ]; then
-      PKG_INSTALL jq
+APP_INSTALL() {
+  if ! app="$(type -p "${1}")" || [ -z "${app}" ]; then
+    echo -ne "installing \033[38;5;12m${app} \033[0m"
+    PKG install -y ${1}
+    if [$? -ne 0]; then
+      EXCEPTION=1
+      echo -e "[ \033[38;5;9mERROR\033[0m ]"
+    else
+      echo -e "[ \033[38;5;10mDONE\033[0m ]"
     fi
+  else
+    echo -e "\033[38;5;12m${app} \033[0mhas been detected. There is not necessary installing him."
+  fi
+}
 
-    if [ ! -e $(which curl) ]; then
-      PKG_INSTALL curl
-    fi
+if [ ! -f ${CORE}/latest/PhantomBot.jar ] && [ "${COMMAND}" = "init" ]; then
+  cd ${PBA_DIR}
+  USEROWN=`stat -c "%U" ${PBA_DIR}/phantombot.sh`
+  USERGRP=`stat -c "%G" ${PBA_DIR}/phantombot.sh`
+  
+  EXCEPTION=0
 
-    if [ ! -e $(which java) ]; then
+  if [ "$(whoami)" = "root" ]; then
+    echo "Checking for installed dependencies:"
+    # installing jq and curl
+    for app in "jq" "curl"; do
+      APP_INSTALL ${app}
+    done
+    
+    # Installing Java Runtime Enviorment    
+    if ! app="$(type -p "java")" || [ -z "${app}" ]; then
+      echo -e "Prepare to install \033[38;5;11mJava Runtime Enviorment\033[0m"
+      TEMPDIR=$(mkdtemp /tmp/pba.XXXXXXXXXX)
       if [ -f /etc/os-release ]; then
-        curl -v -j -k -L -H "Cookie: oraclelicense=accept-securebackup-cookie" ${JAVA_DOWNLOAD}.rpm > ${TEMP}/${JAVA_PACKAGE_NAME}.rpm
-        cd ${TEMP} 
-        yum localinstall -y ${JAVA_PACKAGE_NAME}.rpm
+        # RedHat Distro
+        echo -e "Detected OS: \033[38;5;12m$(cat /etc/os-release)\033[0m"
+        curl -v -j -k -L -H "Cookie: oraclelicense=accept-securebackup-cookie" ${JAVA_DOWNLOAD}.rpm 2>/dev/null > ${TEMPDIR}/${JAVA_PACKAGE_NAME}.rpm
+        echo -ne "Installing \033[38;5;12mJRE \033[0m"
+        PKG localinstall -y ${TEMPDIR}/${JAVA_PACKAGE_NAME}.rpm
+        if [$? -ne 0]; then
+          EXCEPTION=1
+          echo -e "[ \033[38;5;9mERROR\033[0m ]"
+        else
+          echo -e "[ \033[38;5;10mDONE\033[0m ]"
+        fi
       elif [ -f /etc/lsb-release ]; then
+        # Debian Distro
         DISTRO=$(echo `lsb_release -i` | cut -d ':' -f2 | cut -d ' ' -f2)
         VERSION=$(echo `lsb_release -r` | cut -d ':' -f2 | cut -d ' ' -f2)
+        echo -e "Detected OS: \033[38;5;12m${DISTRO} ${VERSION}\033[0m"
         if [[ ${DISTRO} -eq "Debian" ]]; then
-          echo "deb http://ppa.launchpad.net/webupd8team/java/ubuntu xenial main" | tee /etc/apt/sources.list.d/webupd8team-java.list
-          echo "deb-src http://ppa.launchpad.net/webupd8team/java/ubuntu xenial main" | tee -a /etc/apt/sources.list.d/webupd8team-java.list
-          apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys EEA14886
-          apt-get update
-          echo oracle-java8-installer shared/accepted-oracle-license-v1-1 select true | /usr/bin/debconf-set-selections
-          PKG_INSTALL oracle-java8-installer oracle-java8-set-default
-        elif  [[ ${DISTRO} -eq "Ubuntu" ]]; then
-          if compare_version VERSION 13.10; then
-            PKG_INSTALL software-properties-common
-          else
-            PKG_INSTALL python-software-properties
+          if compare_version ${VERSION} 8.0; then
+            echo "deb http://httpredir.debian.org/debian/ jessie main contrib" >> /etc/apt/sources.list
+            PKG_UPDATE && PKG install -y java-package fakeroot
+          elif compare_version ${VERSION} 7.0; then
+            PKG install -t wheezy-backports -y java-package fakeroot
           fi
-          add-apt-repository -y ppa:webupd8team/java
-          apt-get update
-          echo oracle-java8-installer shared/accepted-oracle-license-v1-1 select true | /usr/bin/debconf-set-selections
-          PKG_INSTALL oracle-java8-installer oracle-java8-set-default
+        elif [[ ${DISTRO} -eq "Ubuntu" ]]; then
+          if compare_version ${VERSION} 12.04; then
+            PKG install -t precise-backports -y java-package fakeroot
+          elif compare_version ${VERSION} 14.04 || compare_version ${VERSION} 16.04; then
+            PKG install -y java-package fakeroot
+          else
+            PKG install -y python-software-properties
+            add-apt-repository -y ppa:webupd8team/java
+          fi
         else
-          # Using for other Debian's distribution https://wiki.debian.org/JavaPackage
-          echo "deb http://httpredir.debian.org/debian/ jessie main contrib" > /etc/apt/sources.list.d/debian-contrib.list
-          apt-get update && apt-get install -y java-package
-          apt-get install -y libgl1-mesa-glx libfontconfig1 libxslt1.1 libxtst6 libxxf86vm1 libgtk2.0-0
-          curl -v -j -k -L -H "Cookie: oraclelicense=accept-securebackup-cookie" ${JAVA_DOWNLOAD}.tar.gz > ${TEMP}/${JAVA_PACKAGE_NAME}.tar.gz
-          cd ${TEMP}
-          make-jpkg ${JAVA_PACKAGE_NAME}.tar.gz
-          dpkg -i ${JAVA_DEB_PACKAGE}
-          update-alternatives --auto java
+          echo "deb http://ppa.launchpad.net/webupd8team/java/ubuntu xenial main" >> /etc/apt/sources.list.d/webupd8team-java.list
+          echo "deb-src http://ppa.launchpad.net/webupd8team/java/ubuntu xenial main" >> /etc/apt/sources.list.d/webupd8team-java.list
+          apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys EEA14886
         fi
-      fi
+
+        if [ app="$(type -p "make-jpkg")" || [ ! -z "${app}" ]] && [ app="$(type -p "fakeroot")" || [ ! -z "${app}" ]]; then
+          curl -v -j -k -L -H "Cookie: oraclelicense=accept-securebackup-cookie" ${JAVA_DOWNLOAD}.tar.gz 2>/dev/null > ${TEMPDIR}/${JAVA_PACKAGE_NAME}.tar.gz
+          su - ${USEROWN} -c "fakeroot make-jpkg ${TEMPDIR}/${JAVA_PACKAGE_NAME}.tar.gz"
+          echo -ne "Installing \033[38;5;12mJRE \033[0m"
+          dpkg -i $(find ${TEMPDIR} -name '*.deb') &>/dev/null
+          if [$? -ne 0]; then
+            EXCEPTION=1
+            echo -e "[ \033[38;5;9mERROR\033[0m ]"
+          else
+            echo -e "[ \033[38;5;10mDONE\033[0m ]"
+          fi
+        fi
+
+        if ! app="$(type -p "java")" || [ -z "${app}" ]; then
+          echo "oracle-java8-installer shared/accepted-oracle-license-v1-1 select true" | /usr/bin/debconf-set-selections
+          PKG_UPDATE
+          echo -ne "Installing \033[38;5;12mJRE \033[0m"
+          PKG install -y oracle-java8-installer oracle-java8-set-default
+          if [$? -ne 0]; then
+            EXCEPTION=1
+            echo -e "[ \033[38;5;9mERROR\033[0m ]"
+          else
+            echo -e "[ \033[38;5;10mDONE\033[0m ]"
+          fi
+        fi
+      fi  
     fi
+    if [ EXCEPTION -eq 1 ];then
+      echo -e "Instalation [ \033[38;5;9mFailed \033[0m]"
+      echo "Check exceptions of the install"
+      exit 1
+    fi
+
     current_version=$(curl ${PB_GITHUB} 2>/dev/null | jq -r '.tag_name' | cut -d 'v' -f2)
+
+    echo "Initializing default directories"
+
+    if [ ! -d $TEMP ]; then
+      mkdir $TEMP
+    fi
     
+    if [ ! -d $BACKUP ]; then
+      mkdir $BACKUP
+    fi
+    
+    if [ ! -d $INSTANCES ]; then
+      mkdir $INSTANCES
+    fi
+    
+    if [ ! -d $CORE ]; then
+      mkdir $CORE
+    fi
+
+    sleep 1s
+    echo "Installing PhantomBot Automation"
+      
     mkdir ${TEMP}/${current_version}
     url=`curl ${GITHUB} 2>/dev/null | jq -r '.assets[0].browser_download_url'`
     curl -o ${TEMP}/PhantomBot.zip -L $url 2>/dev/null
@@ -107,7 +180,7 @@ core() {
     mv ${TEMP}/${current_version} ${CORE}
     rm ${CORE}/latest
     ln -s ${CORE}/${current_version} ${CORE}/latest
-
+    
     if [ ! -d ${SKEL} ]; then
       mkdir ${SKEL}
     fi
@@ -128,7 +201,13 @@ core() {
     echo "Try running again as Root."
     exit 1
   fi
-}
+else
+  echo "You don't neeed instalation. Right? Cause you have all."
+  exit 0
+fi
+
+current_version=$(curl ${PB_GITHUB} 2>/dev/null | jq -r '.tag_name' | cut -d 'v' -f2)
+local_version=$(unzip -q -c ${CORE}/latest/PhantomBot.jar 2>/dev/null | grep 'Implementation-Version' | cut -d ':' -f2 | cut -d ' ' -f2)
 
 compare_version() { test "$(printf '%s\n' "$@" | sort -V | head -n 1)" != "$1"; }
 
@@ -145,7 +224,7 @@ instance_pick() {
   echo "Choose instance to continue your action"
   for(( i = 0; i < ${#INSTANCE_LIST[@]}; i++ )); do
     if [ $i == 0 ]; then
-      echo "[$((i + 1))] ${INSTANCE_LIST[$i]} *"			
+      echo "[$((i + 1))] ${INSTANCE_LIST[$i]} *"
     else
       echo "[$((i + 1))] ${INSTANCE_LIST[$i]}"
     fi
@@ -155,16 +234,16 @@ instance_pick() {
 }
 
 getDisplayName() {
-  echo $(curl -h "Accept: application/vnd.twitchtv.v5+json" -H "Client-ID: ${TWITCH_CID}" ${TWITCH}/search/channels?query=${1} 2>/dev/null | jq -r '.channels[0].display_name')
+  echo $(curl -H "Accept: application/vnd.twitchtv.v5+json" -H "Client-ID: ${TWITCH_CID}" ${TWITCH}/search/channels?query=${1} 2>/dev/null | jq -r '.channels[0].display_name')
 }
 
 instance_update() {
   DISPLAY=$(getDisplayName ${1})
-
+  
   if [ -d ${TEMP}/${DISPLAY} ]; then
     rm -rf ${TEMP}/${DISPLAY}
   fi
-
+  
   mkdir ${TEMP}/${DISPLAY}
   cp -rf ${INSTANCES}/${DISPLAY}/{botlogin.txt,phantombot.db,logs} ${TEMP}/${DISPLAY}
   rm -rf ${INSTANCES}/${DISPLAY}/*
@@ -178,7 +257,7 @@ update() {
       ALL=1
     fi
   fi
-
+  
   if [[ -d ${CORE}/${current_version} && ${current_version} == ${local_version} ]]; then
     echo "There is no need to updating"
     exit 0
@@ -190,7 +269,7 @@ update() {
   mv ${TEMP}/${current_version} ${CORE}
   rm ${CORE}/latest
   ln -s ${CORE}/${current_version} ${CORE}/latest
-
+  
   if [ ! -d ${SKEL} ]; then
     mkdir ${SKEL}
   fi
@@ -202,7 +281,7 @@ update() {
     rm ${SKEL}/latest
   fi
   ln -s ${SKEL}/${current_version} ${SKEL}/latest
-
+  
   if [ ALL -eq 1 ]; then
     for INST in ${INSTANCE_LIST[@]}; do
       instance_update ${INST}
@@ -213,12 +292,12 @@ update() {
 backup() {
   if [ -z ${1} ]; then
     cd ${PBA_DIR}
-
+    
     date=`date +%d-%m-%y`
     if [ ! -d ${BACKUP} ]; then
       mkdir ${BACKUP}
     fi
-
+    
     for INST in ${INSTANCE_LIST[@]}; do
       backup ${INST}
     done
@@ -229,11 +308,11 @@ backup() {
     else
       find ${BACKUP}/${DISPLAY}/ -maxdepth 1 -mtime 90 -type d -exec rm -rv {} \;
     fi
-
+    
     if [ ! -d ${BACKUP}/${DISPLAY}/${date} ]; then
       mkdir ${BACKUP}/${DISPLAY}/${date}
     fi
-
+    
     cp -r ${INSTANCES}/${DISPLAY}/{botlogin.txt,phantombot.db,logs} ${BACKUP}/${DISPLAY}/${date}/
     rm ${BACKUP}/${DISPLAY}/${date}.zip
     cd ${BACKUP}/${DISPLAY}/${date}
@@ -242,7 +321,7 @@ backup() {
     rm -rf ${BACKUP}/${DISPLAY}/${date}
     echo "Instance from @${DISPLAY} [ DONE ]"
   fi
-
+  
 }
 
 restore() {
@@ -264,50 +343,56 @@ restore() {
   echo "WARNING!!! This process ovewritting backuping files."
   read -p "Do you wanna continue? [Yes/No]:" -i "Yes" bool
   case ${bool} in
-  y|Y|yes|Yes|YES|*)
-    unzip -o -qq ${BACKUP}/${INST}/${date}.zip -d ${INSTANCES}/${INST}/*
-    echo "Backup restoration complete!"
-    exit 0
+    y|Y|yes|Yes|YES|*)
+      unzip -o -qq ${BACKUP}/${INST}/${date}.zip -d ${INSTANCES}/${INST}/*
+      echo "Backup restoration complete!"
+      exit 0
     ;;
-  n|N|no|No|NO)
-    echo "Aborting...+"
-    exit 0
+    n|N|no|No|NO)
+      echo "Aborting...+"
+      exit 0
     ;;
   esac
 }
 
+read_init_port(){
+  read -p "Port [${1}]: " -i ${1} data
+  echo data
+}
+
+read_init(){
+  if [[ ! -z ${2} && ${2} -eq "yes" ]]; then
+    read -rep "Please, do not leave this empty. ${1}" data
+    sleep 1s
+  else
+    read -p "${1}" data
+  fi
+  if [ -z ${data} ]; then
+    read_init "${1}" "yes"
+  else
+    echo data
+  fi
+}
+
 initialize() {
   DISPLAY=$(getDisplayName ${1})
-
+  
   echo "!!!Very important!!!"
   echo "Do not skip some configurations or bot wouldn't worked"
   read -p "Press ENTER to continue"
-
+  
   echo "Reciving configuration"
-  read -p "Port [25000]: " -i 25000 port
-  read -p "Bot name: " botname
-  if [ -z ${botname} || ${botname} == "" ]; then
-    echo "Please dont leave this empty"
-    read -p "Bot name: " botname
-  fi
-  read -p "Bot authkey (with oauth:) (log in to http://www.twitchapps.com/tmi/ as bot account): " botauth
-  if [ -z ${botauth} || ${botauth} == "" ]; then
-    echo "Please dont leave this empty"
-  read -p "Bot authkey (with oauth:) (log in to http://www.twitchapps.com/tmi/ as bot account): " botauth
-  fi
-  read -p "User authkey (with oauth:) (log in to https://phantombot.tv/oauth/ as streamer): " userauth
-  if [ -z ${userauth} || ${userauth} == "" ]; then
-    echo "Please dont leave this empty"
-  read -p "User authkey (with oauth:) (log in to https://phantombot.tv/oauth/ as streamer): " userauth
-  fi
+  port=`read_init_port 25000`
+  botname=$(getDisplayName `read_init "Bot name: "`)
+  botauth=`read_init "Bot authkey (with oauth:) (log in to http://www.twitchapps.com/tmi/ as bot account): "`
+  userauth=`read_init "User authkey (with oauth:) (log in to https://phantombot.tv/oauth/ as streamer): "`
   password=$(date +%s | sha256sum | base64 | head -c 12 ; echo)
-
-  botname=$(getDisplayName ${botname})
+  
   if [ ! -d ${INSTANCES}/${DISPLAY} ]; then
     mkdir ${INSTANCES}/${DISPLAY}
   fi
   cp -rf ${SKEL}/latest/* ${INSTANCES}/${DISPLAY}
-
+  
   http_port=`[ ! -z $port ] && echo $((port + 5)) || echo $((25000 + 5))`
   port=`[ ! -z $port ] && echo ${port} || echo 25000`
   cat > ${INSTANCES}/${DISPLAY}/botlogin.txt <<EOT
@@ -320,15 +405,15 @@ apioauth=${userauth}
 paneluser=${DISPLAY}
 panelpassword=${password}
 EOT
-
+  
   process_init ${DISPLAY}
-
+  
   cat > ${INSTANCES}/${DISPLAY}.txt <<EOT
 Log in to http://$(hostname --fqdn):${http_port}/ as:
 Username: ${INSTANCE}
 Password: ${password}
 EOT
-
+  
   echo "User has been added."
   cat ${INSTANCES}/${DISPLAY}.txt
 }
@@ -339,18 +424,20 @@ reinitialize() {
 
 process_init() {
   if [ $UID -ne 0 ]; then
-    if [ -d $HOME/.config/systemd/user ]; then
+    echo "Adding process as User"
+    if [ ! -d $HOME/.config/systemd/user ]; then
       mkdir -p $HOME/.config/systemd/user
     fi
-    PROCESS = $HOME/.config/systemd/user/phantombot@${1}.service
+    PROCESS=$HOME/.config/systemd/user/phantombot@${1}.service
   else
-    PROCESS = /etc/systemd/user/phantombot@${1}.service
+    echo "Adding process as Root"
+    PROCESS=/etc/systemd/user/phantombot@${1}.service
   fi
-
-  if [ $2 -eq "delete" ]; then
+  
+  if [[ ${2} == "delete" ]]; then
     rm ${PROCESS}
   else
-    cat > ${PROCESS} <<EOT 
+    cat > ${PROCESS} <<EOT
 [Unit]
 Description=PhantomBot for ${1}
 After=network.target
@@ -363,7 +450,7 @@ ExecStart=/usr/bin/java -Dfile.encoding=UTF-8 -jar ${INSTANCES}/${1}/PhantomBot.
 TimeoutSec=300
 RestartSec=15
 Restart=always
- 
+
 [Install]
 WantedBy=multi-user.target
 
@@ -386,40 +473,62 @@ delete() {
         fi
         echo "The instance [${DISPLAY}] has been removed BibleThump"
         exit 0
-        ;;
+      ;;
       n|N|no|No|NO)
         echo "Operation aboted! Maybe next time. WutFace"
         exit 0
-        ;;
-      esac
+      ;;
+    esac
   else
     echo "This instance dosen't exists [${DISPLAY}]"
     exit 0;
   fi
 }
 
+instance_set() {
+  read -p "Please write Twitch Username. Not a link: " ARGUMENT
+  if [ -z ${ARGUMENT} ]; then
+    echo "I need Twitch Username to continue. Try again."
+    instance_set
+  fi
+}
 
-if [[ ! -e ${CORE}/latest/PhantomBot.jar && ${COMMAND} -eq "init" ]]; then
-  core
-fi
+run() {
+  DISPLAY=$(getDisplayName ${1})
+  systemctl --user start phantombot@${DISPLAY}
+}
+
+shutdown() {
+  DISPLAY=$(getDisplayName ${1})
+  systemctl --user stop phantombot@${DISPLAY}
+}
+
+reload() {
+  DISPLAY=$(getDisplayName ${1})
+  shutdown ${DISPLAY}
+  run ${DISPLAY}
+}
 
 if [[ ${COMMAND} -ne "install" ]]; then
   if [ -z ${INSTANCE_LIST} ] ; then
     echo "There is no instances here."
     echo "Write: \"${0} install\" to install somethign instance"
     exit 0
-  elif [[ -z ${ARGUMENT} && -z ${COMMAND} && ${COMMAND} -ne "help" && ${COMMAND} -ne "install" && ${COMMAND} -ne "update" ]]; then
+    elif [[ -z ${ARGUMENT} && -z ${COMMAND} && ${COMMAND} -ne "help" && ${COMMAND} -ne "install" && ${COMMAND} -ne "update" ]]; then
     instance_pick
   fi
 fi
 
 case ${COMMAND} in
   install)
+    if [ -z ${ARGUMENT} ]; then
+      instance_set
+    fi
     initialize ${ARGUMENT}
-    ;;
+  ;;
   uninstall)
     delete ${ARGUMENT} ${3}
-    ;;
+  ;;
   update)
     if [ -z ${ARGUMENT} ]; then
       update
@@ -430,26 +539,26 @@ case ${COMMAND} in
         instance_update ${ARGUMENT}
       fi
     fi
-    ;;
+  ;;
   reload)
-    reinitalize ${ARGUMENT}
-    ;;
+    reinitialize ${ARGUMENT}
+  ;;
   start)
     run ${ARGUMENT}
-    ;;
+  ;;
   stop)
     shutdown ${ARGUMENT}
-    ;;
-  restart) 
+  ;;
+  restart)
     reload ${ARGUMENT}
-    ;;
+  ;;
   backup)
     backup ${ARGUMENT}
-    ;;
+  ;;
   restore)
     restore ${ARGUMENT}
-    ;;
+  ;;
   help|*)
     echo "Usage: ${0} [install|uninstall|update|reload|help|start|stop|backup|restore]"
-    ;;
+  ;;
 esac
